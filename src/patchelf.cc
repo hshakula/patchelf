@@ -38,7 +38,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
+// #include <unistd.h>
 
 #include "elf.h"
 #include "patchelf.h"
@@ -148,7 +148,7 @@ struct SysError : std::runtime_error
     { }
 };
 
-__attribute__((noreturn)) static void error(const std::string & msg)
+static void error(const std::string & msg)
 {
     if (errno)
         throw SysError(msg);
@@ -169,18 +169,18 @@ static FileContents readFile(const std::string & fileName,
 
     FileContents contents = std::make_shared<std::vector<unsigned char>>(size);
 
-    int fd = open(fileName.c_str(), O_RDONLY | O_BINARY);
-    if (fd == -1) throw SysError(fmt("opening '", fileName, "'"));
+    FILE* fd = fopen(fileName.c_str(), "rb");
+    if (fd == nullptr) throw SysError(fmt("opening '", fileName, "'"));
 
     size_t bytesRead = 0;
-    ssize_t portion;
-    while ((portion = read(fd, contents->data() + bytesRead, size - bytesRead)) > 0)
+    int64_t portion;
+    while ((portion = fread(contents->data() + bytesRead, 1, size - bytesRead, fd)) > 0)
         bytesRead += portion;
 
     if (bytesRead != size)
         throw SysError(fmt("reading '", fileName, "'"));
 
-    close(fd);
+    fclose(fd);
 
     return contents;
 }
@@ -380,14 +380,14 @@ static void writeFile(const std::string & fileName, const FileContents & content
 {
     debug("writing %s\n", fileName.c_str());
 
-    int fd = open(fileName.c_str(), O_CREAT | O_TRUNC | O_WRONLY | O_BINARY, 0777);
-    if (fd == -1)
+    FILE* fd = fopen(fileName.c_str(), "wb");
+    if (fd == nullptr)
         error("open");
 
     size_t bytesWritten = 0;
-    ssize_t portion;
+    int64_t portion;
     while (bytesWritten < contents->size()) {
-        if ((portion = write(fd, contents->data() + bytesWritten, contents->size() - bytesWritten)) < 0) {
+        if ((portion = fwrite(contents->data() + bytesWritten, 1, contents->size() - bytesWritten, fd)) < 0) {
             if (errno == EINTR)
                 continue;
             error("write");
@@ -395,8 +395,10 @@ static void writeFile(const std::string & fileName, const FileContents & content
         bytesWritten += portion;
     }
 
-    if (close(fd) >= 0)
-        return;
+    fclose(fd);
+    return;
+    // if ( >= 0)
+        // return;
     /*
      * Just ignore EINTR; a retry loop is the wrong thing to do.
      *
@@ -676,7 +678,7 @@ void ElfFile<ElfFileParamNames>::rewriteSectionsLibrary()
     unsigned int i = 1;
     Elf_Addr pht_size = sizeof(Elf_Ehdr) + (phdrs.size() + num_notes + 1)*sizeof(Elf_Phdr);
     while( rdi(shdrs.at(i).sh_offset) <= pht_size && i < rdi(hdr()->e_shnum) ) {
-        if (not haveReplacedSection(getSectionName(shdrs.at(i))))
+        if (!haveReplacedSection(getSectionName(shdrs.at(i))))
             replaceSection(getSectionName(shdrs.at(i)), rdi(shdrs.at(i).sh_size));
         i++;
     }
